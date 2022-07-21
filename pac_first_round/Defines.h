@@ -1,8 +1,9 @@
-#include "arrayMD.h"
-#include <complex>
 #include <chrono>
 #include <cmath>
+#include <complex>
 #include <iostream>
+
+#include "arrayMD.h"
 using namespace std;
 using namespace chrono;
 
@@ -24,26 +25,17 @@ using DataType = double;
 
 // Function Definitions
 
-void
-noflagOCC_solver(size_t number_bands,
-                 size_t ngpown,
-                 size_t ncouls,
-                 ARRAY1D_int& inv_igp_index,
-                 ARRAY1D_int& indinv,
-                 ARRAY1D_DataType& wx_array,
-                 ARRAY2D& wtilde_array,
-                 ARRAY2D& aqsmtemp,
-                 ARRAY2D& aqsntemp,
-                 ARRAY2D& I_eps_array,
-                 ARRAY1D_DataType& vcoul,
-                 ARRAY1D& achtemp);
+void noflagOCC_solver(size_t number_bands, size_t ngpown, size_t ncouls,
+                      ARRAY1D_int& inv_igp_index, ARRAY1D_int& indinv,
+                      ARRAY1D_DataType& wx_array, ARRAY2D& wtilde_array,
+                      ARRAY2D& aqsmtemp, ARRAY2D& aqsntemp,
+                      ARRAY2D& I_eps_array, ARRAY1D_DataType& vcoul,
+                      ARRAY1D& achtemp);
 
-inline void ComplexType_print(ComplexType &src)
-{
-  printf("(%f,%f) \n",src.real(),src.imag());
+inline void ComplexType_print(ComplexType& src) {
+  printf("(%f,%f) \n", src.real(), src.imag());
 }
 
-inline ComplexType ComplexType_conj(ComplexType& src)
-{
+inline ComplexType ComplexType_conj(ComplexType& src) {
   return (std::conj(src));
 }

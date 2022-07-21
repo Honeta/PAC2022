@@ -1,14 +1,14 @@
 #ifndef _ARRAYMDCPU_H
 #define _ARRAYMDCPU_H
 
-#include <strings.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <strings.h>
+
 #include <iostream>
 
-template<typename T>
-struct Array1D
-{
+template <typename T>
+struct Array1D {
   unsigned n1;
   unsigned size;
   T* dptr;
@@ -17,89 +17,75 @@ struct Array1D
 
   Array1D() = default;
 
-  Array1D(const Array1D& p)
-  {
+  Array1D(const Array1D& p) {
     n1 = p.n1;
     size = 0;
     dptr = p.dptr;
   }
 
-  Array1D(int in1)
-  {
+  Array1D(int in1) {
     n1 = in1;
     size = n1;
     dptr = new T[size];
   }
 
-  ~Array1D()
-  {
-    if (size && dptr)
-      delete[] dptr;
+  ~Array1D() {
+    if (size && dptr) delete[] dptr;
   }
 
   unsigned getSize() { return size * sizeof(T); }  // NB: in bytes
 };
 
-template<typename T>
-struct Array2D
-{
+template <typename T>
+struct Array2D {
   unsigned n1, n2, b1;
   unsigned size;
   T* dptr;
 
-  inline T& operator()(unsigned i1, unsigned i2)
-  {
+  inline T& operator()(unsigned i1, unsigned i2) {
     return dptr[i2 + (n2 * i1)];
   }
 
-  Array2D()
-  {
+  Array2D() {
     n1 = n2 = 0, b1 = 0;
     size = 0;
     dptr = NULL;
   }
 
-  Array2D(const Array2D& p)
-  {
+  Array2D(const Array2D& p) {
     n1 = p.n1;
     n2 = p.n2;
     size = 0;
     dptr = p.dptr;
   }
 
-  Array2D(int in1, int in2)
-  {
+  Array2D(int in1, int in2) {
     n1 = in1;
     n2 = in2;
     size = n1 * n2;
     dptr = new T[size];
   }
 
-  ~Array2D()
-  {
-    if (size && dptr)
-      delete[] dptr;
+  ~Array2D() {
+    if (size && dptr) delete[] dptr;
   }
 
   unsigned getSize() { return size * sizeof(T); }  // NB: in bytes
 };
 
-template<typename T>
-struct Array3D
-{
+template <typename T>
+struct Array3D {
   unsigned n1, n2, n3;
   unsigned size;
   T* dptr;
 
-  inline T& operator()(unsigned i1, unsigned i2, unsigned i3)
-  {
+  inline T& operator()(unsigned i1, unsigned i2, unsigned i3) {
     return dptr[i3 + i2 * f2 + i1 * f1];
   }
 
   Array3D() = default;
 
-  Array3D(const Array3D& p)
-  {
+  Array3D(const Array3D& p) {
     n1 = p.n1;
     n2 = p.n2;
     n3 = p.n3;
@@ -109,8 +95,7 @@ struct Array3D
     f1 = f2 * n2;
   }
 
-  Array3D(unsigned in1, unsigned in2, unsigned in3)
-  {
+  Array3D(unsigned in1, unsigned in2, unsigned in3) {
     n1 = in1;
     n2 = in2;
     n3 = in3;
@@ -120,34 +105,29 @@ struct Array3D
     dptr = new T[size];
   }
 
-  ~Array3D()
-  {
-    if (size && dptr)
-      delete[] dptr;
+  ~Array3D() {
+    if (size && dptr) delete[] dptr;
   }
 
   unsigned getSize() { return size * sizeof(T); }  // NB: in bytes
 
-private:
+ private:
   unsigned f2, f1, b1, b2;
 };
 
-template<typename T>
-struct Array4D
-{
+template <typename T>
+struct Array4D {
   unsigned n1, n2, n3, n4;
   unsigned size;
   T* dptr;
 
-  inline T& operator()(unsigned i1, unsigned i2, unsigned i3, unsigned i4)
-  {
+  inline T& operator()(unsigned i1, unsigned i2, unsigned i3, unsigned i4) {
     return dptr[i4 + i3 * f3 + i2 * f2 + i1 * f1];
   }
 
   Array4D() = default;
 
-  Array4D(const Array4D& p)
-  {
+  Array4D(const Array4D& p) {
     n1 = p.n1;
     n2 = p.n2;
     n3 = p.n3;
@@ -159,8 +139,7 @@ struct Array4D
     f1 = f2 * n2;
   }
 
-  Array4D(unsigned in1, unsigned in2, unsigned in3, unsigned in4)
-  {
+  Array4D(unsigned in1, unsigned in2, unsigned in3, unsigned in4) {
     n1 = in1;
     n2 = in2;
     n3 = in3;
@@ -172,13 +151,11 @@ struct Array4D
     dptr = new T[size];
   }
 
-  ~Array4D()
-  {
-    if (size && dptr)
-      delete[] dptr;
+  ~Array4D() {
+    if (size && dptr) delete[] dptr;
   }
 
-private:
+ private:
   unsigned f3, f2, f1, b1, b2, b3;
 };
 

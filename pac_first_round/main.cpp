@@ -1,33 +1,32 @@
-#include "Defines.h"
 #include <omp.h>
-#include <cstring>
 
-inline void correntess(ComplexType result1, ComplexType result2, ComplexType result3) {
+#include "Defines.h"
+inline void correntess(ComplexType result1, ComplexType result2,
+                       ComplexType result3) {
   double re_diff, im_diff;
   int numThreads;
-  #pragma omp parallel
-      {
-        int ttid = omp_get_thread_num();
-        if (ttid == 0)
-          numThreads = omp_get_num_threads();
-      }
-   printf("here are %d threads \n",numThreads);
-if(numThreads<= 64){
-  re_diff = fabs(result1.real() - -264241151.454552);
-  im_diff = fabs(result1.imag() - 1321205770.975190);
-  re_diff += fabs(result2.real() - -137405397.758745);
-  im_diff += fabs(result2.imag() - 961837795.884157);
-  re_diff += fabs(result3.real() - -83783779.241634);
-  im_diff += fabs(result3.imag() - 754054017.424472);
-  printf("%f,%f\n",re_diff,im_diff);
-}else{
-  re_diff = fabs(result1.real() - -264241151.200123);
-  im_diff = fabs(result1.imag() - 1321205763.246570);
-  re_diff += fabs(result2.real() - -137405398.773852);
-  im_diff += fabs(result2.imag() - 961837794.726070);
-  re_diff += fabs(result3.real() - -83783779.939936);
-  im_diff += fabs(result3.imag() - 754054018.099450);
-}
+#pragma omp parallel
+  {
+    int ttid = omp_get_thread_num();
+    if (ttid == 0) numThreads = omp_get_num_threads();
+  }
+  printf("here are %d threads \n", numThreads);
+  if (numThreads <= 64) {
+    re_diff = fabs(result1.real() - -264241151.454552);
+    im_diff = fabs(result1.imag() - 1321205770.975190);
+    re_diff += fabs(result2.real() - -137405397.758745);
+    im_diff += fabs(result2.imag() - 961837795.884157);
+    re_diff += fabs(result3.real() - -83783779.241634);
+    im_diff += fabs(result3.imag() - 754054017.424472);
+    printf("%f,%f\n", re_diff, im_diff);
+  } else {
+    re_diff = fabs(result1.real() - -264241151.200123);
+    im_diff = fabs(result1.imag() - 1321205763.246570);
+    re_diff += fabs(result2.real() - -137405398.773852);
+    im_diff += fabs(result2.imag() - 961837794.726070);
+    re_diff += fabs(result3.real() - -83783779.939936);
+    im_diff += fabs(result3.imag() - 754054018.099450);
+  }
   if (re_diff < 10 && im_diff < 10)
     printf("\n!!!! SUCCESS - !!!! Correctness test passed :-D :-D\n\n");
   else
@@ -35,7 +34,6 @@ if(numThreads<= 64){
 }
 
 int main(int argc, char **argv) {
-
   int number_bands = 0, nvband = 0, ncouls = 0, nodes_per_group = 0;
   int npes = 1;
   if (argc == 1) {
@@ -70,8 +68,8 @@ int main(int argc, char **argv) {
   double elapsedKernelTimer;
 
   // Printing out the params passed.
-  std::cout << "Sizeof(ComplexType = "
-            << sizeof(ComplexType) << " bytes" << std::endl;
+  std::cout << "Sizeof(ComplexType = " << sizeof(ComplexType) << " bytes"
+            << std::endl;
   std::cout << "number_bands = " << number_bands << "\t nvband = " << nvband
             << "\t ncouls = " << ncouls
             << "\t nodes_per_group  = " << nodes_per_group
@@ -120,20 +118,17 @@ int main(int argc, char **argv) {
       wtilde_array(i, j) = expr;
     }
 
-  for (int i = 0; i < ncouls; i++)
-    vcoul(i) = 1.0;
+  for (int i = 0; i < ncouls; i++) vcoul(i) = 1.0;
 
   for (int ig = 0; ig < ngpown; ++ig)
     inv_igp_index(ig) = (ig + 1) * ncouls / ngpown;
 
-  for (int ig = 0; ig < ncouls; ++ig)
-    indinv(ig) = ig;
+  for (int ig = 0; ig < ncouls; ++ig) indinv(ig) = ig;
   indinv(ncouls) = ncouls - 1;
 
   for (int iw = nstart; iw < nend; ++iw) {
     wx_array(iw) = e_lk - e_n1kq + dw * ((iw + 1) - 2);
-    if (wx_array(iw) < to1)
-      wx_array(iw) = to1;
+    if (wx_array(iw) < to1) wx_array(iw) = to1;
   }
 
   k_start = system_clock::now();
@@ -146,10 +141,10 @@ int main(int argc, char **argv) {
   elapsedKernelTimer = elapsed.count();
 
   // Check for correctness
-  //correntess0(achtemp(0));
-  //correntess1(achtemp(1));
-  //correntess2(achtemp(2));
-  correntess(achtemp(0),achtemp(1),achtemp(2));
+  // correntess0(achtemp(0));
+  // correntess1(achtemp(1));
+  // correntess2(achtemp(2));
+  correntess(achtemp(0), achtemp(1), achtemp(2));
   printf("\n Final achtemp\n");
   ComplexType_print(achtemp(0));
   ComplexType_print(achtemp(1));
@@ -178,31 +173,27 @@ void noflagOCC_solver(size_t number_bands, size_t ngpown, size_t ncouls,
   DataType ach_re0 = 0.00, ach_re1 = 0.00, ach_re2 = 0.00, ach_im0 = 0.00,
            ach_im1 = 0.00, ach_im2 = 0.00;
 
-  DataType achtemp_re_loc[nend - nstart], achtemp_im_loc[nend - nstart];
-
 #pragma omp parallel for \
-	 reduction(+:ach_re0, ach_re1, ach_re2, ach_im0, ach_im1, ach_im2) 
+	 reduction(+:ach_re0, ach_re1, ach_re2, ach_im0, ach_im1, ach_im2)
   for (int n1 = 0; n1 < number_bands; ++n1) {
     for (int ig = 0; ig < ncouls; ++ig) {
       for (int my_igp = 0; my_igp < ngpown; ++my_igp) {
         int indigp = inv_igp_index(my_igp);
         int igp = indinv(indigp);
-        
-        memset(achtemp_re_loc, 0, sizeof(achtemp_re_loc));
-        memset(achtemp_im_loc, 0, sizeof(achtemp_im_loc));
-
-        ComplexType sch_store1 =
-            ComplexType_conj(aqsmtemp(n1, igp)) * aqsntemp(n1, igp) * 0.5 *
-            vcoul(igp) * wtilde_array(my_igp, igp);
+        DataType achtemp_re_loc[nend - nstart], achtemp_im_loc[nend - nstart];
+        for (int iw = nstart; iw < nend; ++iw) {
+          achtemp_re_loc[iw] = 0.00;
+          achtemp_im_loc[iw] = 0.00;
+        }
+        ComplexType sch_store1 = ComplexType_conj(aqsmtemp(n1, igp)) *
+                                 aqsntemp(n1, igp) * 0.5 * vcoul(igp) *
+                                 wtilde_array(my_igp, igp);
 
         for (int iw = nstart; iw < nend; ++iw) {
-          ComplexType wdiff =
-              wx_array(iw) - wtilde_array(my_igp, ig);
-          ComplexType delw =
-              ComplexType_conj(wdiff) *
-              (1 / (wdiff * ComplexType_conj(wdiff)).real());
-          ComplexType sch_array =
-              delw * I_eps_array(my_igp, ig) * sch_store1;
+          ComplexType wdiff = wx_array(iw) - wtilde_array(my_igp, ig);
+          ComplexType delw = ComplexType_conj(wdiff) *
+                             (1 / (wdiff * ComplexType_conj(wdiff)).real());
+          ComplexType sch_array = delw * I_eps_array(my_igp, ig) * sch_store1;
 
           achtemp_re_loc[iw] += (sch_array).real();
           achtemp_im_loc[iw] += (sch_array).imag();
@@ -214,9 +205,8 @@ void noflagOCC_solver(size_t number_bands, size_t ngpown, size_t ncouls,
         ach_im1 += achtemp_im_loc[1];
         ach_im2 += achtemp_im_loc[2];
       }
-    } 
-  }   
-
+    }
+  }
 
   achtemp(0) = ComplexType(ach_re0, ach_im0);
   achtemp(1) = ComplexType(ach_re1, ach_im1);
