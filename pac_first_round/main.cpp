@@ -47,10 +47,10 @@ int main(int argc, char **argv) {
     ncouls = atoi(argv[3]);
     nodes_per_group = atoi(argv[4]);
   } else {
-    std::cout << "The correct form of input is : " << endl;
+    std::cout << "The correct form of input is : " << std::endl;
     std::cout << " ./main.exe <number_bands> <number_valence_bands> "
                  "<number_plane_waves> <nodes_per_mpi_group> "
-              << endl;
+              << std::endl;
     exit(0);
   }
   int ngpown = ncouls / (nodes_per_group * npes);
@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
             << "\t ncouls = " << ncouls
             << "\t nodes_per_group  = " << nodes_per_group
             << "\t ngpown = " << ngpown << "\t nend = " << nend
-            << "\t nstart = " << nstart << endl;
+            << "\t nstart = " << nstart << std::endl;
 
   size_t memFootPrint = 0.00;
 
@@ -103,7 +103,7 @@ int main(int argc, char **argv) {
 
   // Print Memory Foot print
   cout << "Memory Foot Print = " << memFootPrint / pow(1024, 3) << " GBs"
-       << endl;
+       << std::endl;
 
   ComplexType expr(.5, .5);
   for (int i = 0; i < number_bands; i++)
@@ -154,12 +154,14 @@ int main(int argc, char **argv) {
   elapsed = end - start;
 
   cout << "********** Kernel Time Taken **********= " << elapsedKernelTimer
-       << " secs" << endl;
+       << " secs" << std::endl;
   cout << "********** Total Time Taken **********= " << elapsed.count()
-       << " secs" << endl;
+       << " secs" << std::endl;
 
   return 0;
 }
+
+// using namespace sycl;
 
 void noflagOCC_solver(size_t number_bands, size_t ngpown, size_t ncouls,
                       ARRAY1D_int &inv_igp_index, ARRAY1D_int &indinv,
@@ -176,18 +178,16 @@ void noflagOCC_solver(size_t number_bands, size_t ngpown, size_t ncouls,
 #pragma omp parallel for \
 	 reduction(+:ach_re0, ach_re1, ach_re2, ach_im0, ach_im1, ach_im2)
   for (int n1 = 0; n1 < number_bands; ++n1) {
-    for (int ig = 0; ig < ncouls; ++ig) {
-      for (int my_igp = 0; my_igp < ngpown; ++my_igp) {
-        int indigp = inv_igp_index(my_igp);
-        int igp = indinv(indigp);
-        DataType achtemp_re_loc[nend - nstart], achtemp_im_loc[nend - nstart];
-        for (int iw = nstart; iw < nend; ++iw) {
-          achtemp_re_loc[iw] = 0.00;
-          achtemp_im_loc[iw] = 0.00;
-        }
-        ComplexType sch_store1 = ComplexType_conj(aqsmtemp(n1, igp)) *
-                                 aqsntemp(n1, igp) * 0.5 * vcoul(igp) *
-                                 wtilde_array(my_igp, igp);
+    for (int my_igp = 0; my_igp < ngpown; ++my_igp) {
+      int indigp = inv_igp_index(my_igp);
+      int igp = indinv(my_igp);
+      auto aqsn = aqsntemp(n1, igp);
+      ComplexType sch_store1 = ComplexType_conj(aqsn) * aqsn * 0.5 *
+                               vcoul(igp) * wtilde_array(my_igp, igp);
+
+      for (int ig = 0; ig < ncouls; ++ig) {
+        DataType achtemp_re_loc[nend - nstart]{},
+            achtemp_im_loc[nend - nstart]{};
 
         for (int iw = nstart; iw < nend; ++iw) {
           ComplexType wdiff = wx_array(iw) - wtilde_array(my_igp, ig);
