@@ -175,15 +175,25 @@ void noflagOCC_solver(size_t number_bands, size_t ngpown, size_t ncouls,
   DataType ach_re0 = 0.00, ach_re1 = 0.00, ach_re2 = 0.00, ach_im0 = 0.00,
            ach_im1 = 0.00, ach_im2 = 0.00;
 
+  ARRAY2D sch(number_bands, ncouls);
+  ARRAY1D_int _indinv(ngpown);
+#pragma omp parallel for
+  for (int n1 = 0; n1 < number_bands; ++n1) {
+    for (int my_igp = 0; my_igp < ngpown; ++my_igp) {
+      _indinv(my_igp) = indinv(inv_igp_index(my_igp));
+      int igp = _indinv(my_igp);
+      sch(n1, my_igp) = ComplexType_conj(aqsmtemp(n1, igp)) *
+                        aqsntemp(n1, igp) * 0.5 * vcoul(igp) *
+                        wtilde_array(my_igp, igp);
+    }
+  }
+
 #pragma omp parallel for \
 	 reduction(+:ach_re0, ach_re1, ach_re2, ach_im0, ach_im1, ach_im2)
   for (int n1 = 0; n1 < number_bands; ++n1) {
     for (int my_igp = 0; my_igp < ngpown; ++my_igp) {
-      int indigp = inv_igp_index(my_igp);
-      int igp = indinv(my_igp);
-      auto aqsn = aqsntemp(n1, igp);
-      ComplexType sch_store1 = ComplexType_conj(aqsn) * aqsn * 0.5 *
-                               vcoul(igp) * wtilde_array(my_igp, igp);
+      int igp = _indinv(my_igp);
+      ComplexType sch_store1 = sch(n1, my_igp);
 
       for (int ig = 0; ig < ncouls; ++ig) {
         DataType achtemp_re_loc[nend - nstart]{},
