@@ -1,9 +1,9 @@
 
-CXX=icpx
+CXX=dpcpp
 
 gpp_obj = main.o
 
-CXXFLAGS = -Ofast -std=c++11 -qopenmp
+CXXFLAGS = -Ofast -std=c++20 -qopenmp
 LDFLAGS = 
 
 all: main 
