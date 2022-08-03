@@ -179,7 +179,6 @@ void noflagOCC_solver(size_t number_bands, size_t ngpown, size_t ncouls,
   auto ctx = q.get_context();
   int *gpu_inv_igp_index = malloc_device<int>(ngpown, q);
   int *gpu_indinv = malloc_device<int>(ngpown, q);
-  int *_gpu_indinv = malloc_device<int>(ngpown, q);
   DataType *gpu_vcoul = malloc_device<DataType>(ncouls, q);
   DataType *gpu_wx_array = malloc_device<DataType>(nend - nstart, q);
   ComplexType *gpu_wtilde_array =
@@ -192,11 +191,10 @@ void noflagOCC_solver(size_t number_bands, size_t ngpown, size_t ncouls,
   ComplexType *sch = malloc_device<ComplexType>(number_bands * ncouls, q);
 
   time_point<system_clock> start, end;
-  start = system_clock::now();
 
+  start = system_clock::now();
   q.memcpy(gpu_inv_igp_index, inv_igp_index.dptr, ngpown * sizeof(int)).wait();
   q.memcpy(gpu_indinv, indinv.dptr, ngpown * sizeof(int)).wait();
-  q.memcpy(_gpu_indinv, indinv.dptr, ngpown * sizeof(int)).wait();
   q.memcpy(gpu_vcoul, vcoul.dptr, ngpown * sizeof(DataType)).wait();
   q.memcpy(gpu_wx_array, wx_array.dptr, (nend - nstart) * sizeof(DataType))
       .wait();
@@ -212,20 +210,30 @@ void noflagOCC_solver(size_t number_bands, size_t ngpown, size_t ncouls,
   q.memcpy(gpu_aqsmtemp, aqsmtemp.dptr,
            number_bands * ncouls * sizeof(ComplexType))
       .wait();
+  end = system_clock::now();
+  duration<double> elapsed = end - start;
+  double elapsedKernelTimer = elapsed.count();
+  cout << "********** Copy Time Taken **********= " << elapsed.count()
+       << " secs" << std::endl;
 
+  start = system_clock::now();
   q.submit([&](handler &h) {
      h.parallel_for(range<2>(number_bands, ngpown), [=](item<2> item) {
        int n1 = item.get_id(0);
        int my_igp = item.get_id(1);
        int indigp = gpu_inv_igp_index[my_igp];
        int igp = gpu_indinv[my_igp];
-       _gpu_indinv[my_igp] = gpu_indinv[indigp];
        sch[n1 * ncouls + my_igp] =
            ComplexType_conj(gpu_aqsmtemp[n1 * ncouls + igp]) *
            gpu_aqsntemp[n1 * ncouls + igp] * 0.5 * gpu_vcoul[igp] *
            gpu_wtilde_array[my_igp * ncouls + igp];
      });
    }).wait();
+  end = system_clock::now();
+  elapsed = end - start;
+  elapsedKernelTimer = elapsed.count();
+  std::cout << "********** Pre-process Time Taken **********= "
+            << elapsed.count() << " secs" << std::endl;
 
   auto ach_re0 = malloc_shared<DataType>(1, q);
   auto ach_re1 = malloc_shared<DataType>(1, q);
@@ -235,19 +243,22 @@ void noflagOCC_solver(size_t number_bands, size_t ngpown, size_t ncouls,
   auto ach_im2 = malloc_shared<DataType>(1, q);
   ach_re0[0] = 0.00, ach_re1[0] = 0.00, ach_re2[0] = 0.00, ach_im0[0] = 0.00,
   ach_im1[0] = 0.00, ach_im2[0] = 0.00;
-
+  start = system_clock::now();
+  int _number_bands =
+      number_bands % 64 == 0 ? number_bands : (((number_bands << 6) + 1) >> 6);
+  int _ngpown = ngpown % 2 == 0 ? ngpown : ngpown + 1;
   q.submit([&](handler &h) {
      h.parallel_for(
-         nd_range<2>(range<2>(number_bands, ngpown), range<2>(64, 2)),
+         nd_range<2>(range<2>(_number_bands, _ngpown), range<2>(64, 2)),
          reduction(ach_re0, sycl::plus<>()), reduction(ach_re1, sycl::plus<>()),
          reduction(ach_re2, sycl::plus<>()), reduction(ach_im0, sycl::plus<>()),
          reduction(ach_im1, sycl::plus<>()), reduction(ach_im2, sycl::plus<>()),
          [=](nd_item<2> item, auto &ach_re0, auto &ach_re1, auto &ach_re2,
              auto &ach_im0, auto &ach_im1,
-             auto &ach_im2) [[intel::reqd_sub_group_size(16)]] {
+             auto &ach_im2) [[intel::reqd_sub_group_size(32)]] {
            int n1 = item.get_global_id(0);
            int my_igp = item.get_global_id(1);
-           int igp = _gpu_indinv[my_igp];
+           if (n1 > number_bands || my_igp > ngpown) return;
            ComplexType sch_store1 = sch[n1 * ncouls + my_igp];
 
            for (int ig = 0; ig < ncouls; ++ig) {
@@ -275,6 +286,11 @@ void noflagOCC_solver(size_t number_bands, size_t ngpown, size_t ncouls,
            }
          });
    }).wait();
+  end = system_clock::now();
+  elapsed = end - start;
+  elapsedKernelTimer = elapsed.count();
+  cout << "********** Calculation Time Taken **********= " << elapsed.count()
+       << " secs" << std::endl;
 
   achtemp(0) = ComplexType(ach_re0[0], ach_im0[0]);
   achtemp(1) = ComplexType(ach_re1[0], ach_im1[0]);
@@ -282,7 +298,6 @@ void noflagOCC_solver(size_t number_bands, size_t ngpown, size_t ncouls,
 
   sycl::free(gpu_inv_igp_index, q);
   sycl::free(gpu_indinv, q);
-  sycl::free(_gpu_indinv, q);
   sycl::free(gpu_vcoul, q);
   sycl::free(gpu_wx_array, q);
   sycl::free(gpu_wtilde_array, q);
