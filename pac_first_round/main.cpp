@@ -3,6 +3,7 @@
 #include <CL/sycl.hpp>
 
 #include "Defines.h"
+
 inline void correntess(ComplexType result1, ComplexType result2,
                        ComplexType result3) {
   double re_diff, im_diff;
@@ -221,8 +222,7 @@ void noflagOCC_solver(size_t number_bands, size_t ngpown, size_t ncouls,
      h.parallel_for(range<2>(number_bands, ngpown), [=](item<2> item) {
        int n1 = item.get_id(0);
        int my_igp = item.get_id(1);
-       int indigp = gpu_inv_igp_index[my_igp];
-       int igp = gpu_indinv[my_igp];
+       int igp = gpu_indinv[gpu_inv_igp_index[my_igp]];
        sch[n1 * ncouls + my_igp] =
            ComplexType_conj(gpu_aqsmtemp[n1 * ncouls + igp]) *
            gpu_aqsntemp[n1 * ncouls + igp] * 0.5 * gpu_vcoul[igp] *
@@ -258,31 +258,36 @@ void noflagOCC_solver(size_t number_bands, size_t ngpown, size_t ncouls,
              auto &ach_im2) [[intel::reqd_sub_group_size(32)]] {
            int n1 = item.get_global_id(0);
            int my_igp = item.get_global_id(1);
+
            if (n1 > number_bands || my_igp > ngpown) return;
+
            ComplexType sch_store1 = sch[n1 * ncouls + my_igp];
 
            for (int ig = 0; ig < ncouls; ++ig) {
-             DataType achtemp_re_loc[nend - nstart]{},
-                 achtemp_im_loc[nend - nstart]{};
+             auto wdiff =
+                 gpu_wx_array[0] - gpu_wtilde_array[my_igp * ncouls + ig];
+             auto delw = ComplexType_conj(wdiff) *
+                         (1 / (wdiff * ComplexType_conj(wdiff)).real());
+             auto sch_array =
+                 delw * gpu_wtilde_array[my_igp * ncouls + ig] * sch_store1;
+             ach_re0 += (sch_array).real();
+             ach_im0 += (sch_array).imag();
 
-             for (int iw = nstart; iw < nend; ++iw) {
-               ComplexType wdiff =
-                   gpu_wx_array[iw] - gpu_wtilde_array[my_igp * ncouls + ig];
-               ComplexType delw =
-                   ComplexType_conj(wdiff) *
-                   (1 / (wdiff * ComplexType_conj(wdiff)).real());
-               ComplexType sch_array =
-                   delw * gpu_I_eps_array[my_igp * ncouls + ig] * sch_store1;
+             wdiff = gpu_wx_array[1] - gpu_wtilde_array[my_igp * ncouls + ig];
+             delw = ComplexType_conj(wdiff) *
+                    (1 / (wdiff * ComplexType_conj(wdiff)).real());
+             sch_array =
+                 delw * gpu_wtilde_array[my_igp * ncouls + ig] * sch_store1;
+             ach_re1 += (sch_array).real();
+             ach_im1 += (sch_array).imag();
 
-               achtemp_re_loc[iw] += (sch_array).real();
-               achtemp_im_loc[iw] += (sch_array).imag();
-             }
-             ach_re0 += achtemp_re_loc[0];
-             ach_re1 += achtemp_re_loc[1];
-             ach_re2 += achtemp_re_loc[2];
-             ach_im0 += achtemp_im_loc[0];
-             ach_im1 += achtemp_im_loc[1];
-             ach_im2 += achtemp_im_loc[2];
+             wdiff = gpu_wx_array[2] - gpu_wtilde_array[my_igp * ncouls + ig];
+             delw = ComplexType_conj(wdiff) *
+                    (1 / (wdiff * ComplexType_conj(wdiff)).real());
+             sch_array =
+                 delw * gpu_wtilde_array[my_igp * ncouls + ig] * sch_store1;
+             ach_re2 += (sch_array).real();
+             ach_im2 += (sch_array).imag();
            }
          });
    }).wait();
