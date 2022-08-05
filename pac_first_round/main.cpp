@@ -1,35 +1,36 @@
 #include <omp.h>
 
 #include <CL/sycl.hpp>
+#include <thread>
 
 #include "Defines.h"
 
 inline void correntess(ComplexType result1, ComplexType result2,
                        ComplexType result3) {
   double re_diff, im_diff;
-  int numThreads;
-#pragma omp parallel
-  {
-    int ttid = omp_get_thread_num();
-    if (ttid == 0) numThreads = omp_get_num_threads();
-  }
+  int numThreads = 128;
+  // #pragma omp parallel
+  //   {
+  //     int ttid = omp_get_thread_num();
+  //     if (ttid == 0) numThreads = omp_get_num_threads();
+  //   }
   printf("here are %d threads \n", numThreads);
-  // if (numThreads <= 64) {
-  //   re_diff = fabs(result1.real() - -264241151.454552);
-  //   im_diff = fabs(result1.imag() - 1321205770.975190);
-  //   re_diff += fabs(result2.real() - -137405397.758745);
-  //   im_diff += fabs(result2.imag() - 961837795.884157);
-  //   re_diff += fabs(result3.real() - -83783779.241634);
-  //   im_diff += fabs(result3.imag() - 754054017.424472);
-  //   printf("%f,%f\n", re_diff, im_diff);
-  // } else {
-  re_diff = fabs(result1.real() - -264241151.200123);
-  im_diff = fabs(result1.imag() - 1321205763.246570);
-  re_diff += fabs(result2.real() - -137405398.773852);
-  im_diff += fabs(result2.imag() - 961837794.726070);
-  re_diff += fabs(result3.real() - -83783779.939936);
-  im_diff += fabs(result3.imag() - 754054018.099450);
-  // }
+  if (numThreads <= 64) {
+    re_diff = fabs(result1.real() - -264241151.454552);
+    im_diff = fabs(result1.imag() - 1321205770.975190);
+    re_diff += fabs(result2.real() - -137405397.758745);
+    im_diff += fabs(result2.imag() - 961837795.884157);
+    re_diff += fabs(result3.real() - -83783779.241634);
+    im_diff += fabs(result3.imag() - 754054017.424472);
+    printf("%f,%f\n", re_diff, im_diff);
+  } else {
+    re_diff = fabs(result1.real() - -264241151.200123);
+    im_diff = fabs(result1.imag() - 1321205763.246570);
+    re_diff += fabs(result2.real() - -137405398.773852);
+    im_diff += fabs(result2.imag() - 961837794.726070);
+    re_diff += fabs(result3.real() - -83783779.939936);
+    im_diff += fabs(result3.imag() - 754054018.099450);
+  }
   if (re_diff < 10 && im_diff < 10)
     printf("\n!!!! SUCCESS - !!!! Correctness test passed :-D :-D\n\n");
   else
@@ -166,6 +167,110 @@ int main(int argc, char **argv) {
 
 using namespace sycl;
 
+#define MIN(x, y) ((x) < (y) ? (x) : (y))
+
+void calculate(int thread_id, queue &q, size_t &number_bands, size_t &ngpown,
+               size_t &ncouls, ComplexType *wtilde_array, DataType *wx_array,
+               ComplexType *I_eps_array, ComplexType *sch, ARRAY1D &achtemp) {
+  int _number_bands =
+      number_bands % 256 == 0 ? number_bands : (((number_bands << 8) + 1) >> 8);
+  int _ngpown = ngpown % 2 == 0 ? ngpown : ngpown + 1;
+  int number_bands_per_tile = _number_bands >> 2;
+
+  DataType *ach_re0 = malloc_shared<DataType>(1, q);
+  DataType *ach_re1 = malloc_shared<DataType>(1, q);
+  DataType *ach_re2 = malloc_shared<DataType>(1, q);
+  DataType *ach_im0 = malloc_shared<DataType>(1, q);
+  DataType *ach_im1 = malloc_shared<DataType>(1, q);
+  DataType *ach_im2 = malloc_shared<DataType>(1, q);
+  ach_re0[0] = 0.00, ach_re1[0] = 0.00, ach_re2[0] = 0.00, ach_im0[0] = 0.00,
+  ach_im1[0] = 0.00, ach_im2[0] = 0.00;
+
+  DataType *gpu_wx_array = malloc_device<DataType>(nend - nstart, q);
+  ComplexType *gpu_wtilde_array =
+      malloc_device<ComplexType>(ngpown * ncouls, q);
+  ComplexType *gpu_I_eps_array = malloc_device<ComplexType>(ngpown * ncouls, q);
+  ComplexType *gpu_sch =
+      malloc_device<ComplexType>(number_bands_per_tile * ngpown, q);
+
+  q.memcpy(gpu_wtilde_array, wtilde_array,
+           ngpown * ncouls * sizeof(ComplexType))
+      .wait();
+  q.memcpy(gpu_wx_array, wx_array, (nend - nstart) * sizeof(DataType)).wait();
+  q.memcpy(gpu_I_eps_array, I_eps_array, ngpown * ncouls * sizeof(ComplexType))
+      .wait();
+  if (number_bands_per_tile * thread_id < number_bands) {
+    int count = ngpown *
+                MIN(number_bands_per_tile,
+                    number_bands - number_bands_per_tile * thread_id) *
+                sizeof(ComplexType);
+    q.memcpy(gpu_sch, sch + number_bands_per_tile * ngpown * thread_id, count)
+        .wait();
+  }
+
+  int offset = number_bands_per_tile * thread_id;
+
+  q.submit([&](handler &h) {
+     h.parallel_for(
+         nd_range<2>(range<2>(number_bands_per_tile, _ngpown), range<2>(64, 2)),
+         reduction(ach_re0, sycl::plus<>()), reduction(ach_re1, sycl::plus<>()),
+         reduction(ach_re2, sycl::plus<>()), reduction(ach_im0, sycl::plus<>()),
+         reduction(ach_im1, sycl::plus<>()), reduction(ach_im2, sycl::plus<>()),
+         [=](nd_item<2> item, auto &ach_re0, auto &ach_re1, auto &ach_re2,
+             auto &ach_im0, auto &ach_im1,
+             auto &ach_im2) [[intel::reqd_sub_group_size(8)]] {
+           int n1 = item.get_global_id(0);
+           int my_igp = item.get_global_id(1);
+
+           if (n1 + offset >= number_bands || my_igp >= ngpown) return;
+
+           ComplexType sch_store1 = gpu_sch[n1 * ngpown + my_igp];
+
+           for (int ig = 0; ig < ncouls; ++ig) {
+             auto wdiff =
+                 gpu_wx_array[0] - gpu_wtilde_array[my_igp * ncouls + ig];
+             auto delw = ComplexType_conj(wdiff) *
+                         (1 / (wdiff * ComplexType_conj(wdiff)).real());
+             auto sch_array =
+                 delw * gpu_wtilde_array[my_igp * ncouls + ig] * sch_store1;
+             ach_re0 += (sch_array).real();
+             ach_im0 += (sch_array).imag();
+
+             wdiff = gpu_wx_array[1] - gpu_wtilde_array[my_igp * ncouls + ig];
+             delw = ComplexType_conj(wdiff) *
+                    (1 / (wdiff * ComplexType_conj(wdiff)).real());
+             sch_array =
+                 delw * gpu_wtilde_array[my_igp * ncouls + ig] * sch_store1;
+             ach_re1 += (sch_array).real();
+             ach_im1 += (sch_array).imag();
+
+             wdiff = gpu_wx_array[2] - gpu_wtilde_array[my_igp * ncouls + ig];
+             delw = ComplexType_conj(wdiff) *
+                    (1 / (wdiff * ComplexType_conj(wdiff)).real());
+             sch_array =
+                 delw * gpu_wtilde_array[my_igp * ncouls + ig] * sch_store1;
+             ach_re2 += (sch_array).real();
+             ach_im2 += (sch_array).imag();
+           }
+         });
+   }).wait();
+
+  achtemp(0) += ComplexType(ach_re0[0], ach_im0[0]);
+  achtemp(1) += ComplexType(ach_re1[0], ach_im1[0]);
+  achtemp(2) += ComplexType(ach_re2[0], ach_im2[0]);
+
+  sycl::free(gpu_wx_array, q);
+  sycl::free(gpu_wtilde_array, q);
+  sycl::free(gpu_I_eps_array, q);
+  sycl::free(gpu_sch, q);
+  sycl::free(ach_im0, q);
+  sycl::free(ach_im1, q);
+  sycl::free(ach_im2, q);
+  sycl::free(ach_re0, q);
+  sycl::free(ach_re1, q);
+  sycl::free(ach_re2, q);
+}
+
 void noflagOCC_solver(size_t number_bands, size_t ngpown, size_t ncouls,
                       ARRAY1D_int &inv_igp_index, ARRAY1D_int &indinv,
                       ARRAY1D_DataType &wx_array, ARRAY2D &wtilde_array,
@@ -173,558 +278,41 @@ void noflagOCC_solver(size_t number_bands, size_t ngpown, size_t ncouls,
                       ARRAY2D &I_eps_array, ARRAY1D_DataType &vcoul,
                       ARRAY1D &achtemp) {
   auto root_devices = platform(gpu_selector{}).get_devices();
+  vector<queue> sub_queues;
 
-  auto q_0 = queue(
-      root_devices[0]
-          .create_sub_devices<
-              cl::sycl::info::partition_property::partition_by_affinity_domain>(
-              cl::sycl::info::partition_affinity_domain::next_partitionable)
-              [0]);
+  for (auto root_device : root_devices) {
+    auto sub_devices = root_device.create_sub_devices<
+        cl::sycl::info::partition_property::partition_by_affinity_domain>(
+        cl::sycl::info::partition_affinity_domain::next_partitionable);
+    for (auto sub_device : sub_devices) {
+      sub_queues.push_back(queue(sub_device));
+    }
+  }
 
-  auto q_1 = queue(
-      root_devices[0]
-          .create_sub_devices<
-              cl::sycl::info::partition_property::partition_by_affinity_domain>(
-              cl::sycl::info::partition_affinity_domain::next_partitionable)
-              [1]);
+  ARRAY2D sch(number_bands, ngpown);
+  // #pragma omp parallel for
+  for (int n1 = 0; n1 < number_bands; ++n1) {
+    for (int my_igp = 0; my_igp < ngpown; ++my_igp) {
+      int igp = indinv(inv_igp_index(my_igp));
+      sch(n1, my_igp) = ComplexType_conj(aqsmtemp(n1, igp)) *
+                        aqsntemp(n1, igp) * 0.5 * vcoul(igp) *
+                        wtilde_array(my_igp, igp);
+    }
+  }
 
-  auto q_2 = queue(
-      root_devices[1]
-          .create_sub_devices<
-              cl::sycl::info::partition_property::partition_by_affinity_domain>(
-              cl::sycl::info::partition_affinity_domain::next_partitionable)
-              [0]);
+  achtemp(0) = ComplexType(0.00, 0.00);
+  achtemp(1) = ComplexType(0.00, 0.00);
+  achtemp(2) = ComplexType(0.00, 0.00);
 
-  auto q_3 = queue(
-      root_devices[1]
-          .create_sub_devices<
-              cl::sycl::info::partition_property::partition_by_affinity_domain>(
-              cl::sycl::info::partition_affinity_domain::next_partitionable)
-              [1]);
+  std::thread threads[4];
+  for (int i = 0; i < 4; ++i) {
+    threads[i] = std::thread(calculate, i, std::ref(sub_queues[i]),
+                             std::ref(number_bands), std::ref(ngpown),
+                             std::ref(ncouls), wtilde_array.dptr, wx_array.dptr,
+                             I_eps_array.dptr, sch.dptr, std::ref(achtemp));
+  }
 
-  int _number_bands =
-      number_bands % 256 == 0 ? number_bands : (((number_bands << 8) + 1) >> 8);
-  int _ngpown = ngpown % 2 == 0 ? ngpown : ngpown + 1;
-  int number_bands_per_tile = _number_bands >> 2;
-
-  DataType *ach_re0_0 = malloc_shared<DataType>(1, q_0);
-  DataType *ach_re1_0 = malloc_shared<DataType>(1, q_0);
-  DataType *ach_re2_0 = malloc_shared<DataType>(1, q_0);
-  DataType *ach_im0_0 = malloc_shared<DataType>(1, q_0);
-  DataType *ach_im1_0 = malloc_shared<DataType>(1, q_0);
-  DataType *ach_im2_0 = malloc_shared<DataType>(1, q_0);
-  ach_re0_0[0] = 0.00, ach_re1_0[0] = 0.00, ach_re2_0[0] = 0.00,
-  ach_im0_0[0] = 0.00, ach_im1_0[0] = 0.00, ach_im2_0[0] = 0.00;
-
-  DataType *ach_re0_1 = malloc_shared<DataType>(1, q_1);
-  DataType *ach_re1_1 = malloc_shared<DataType>(1, q_1);
-  DataType *ach_re2_1 = malloc_shared<DataType>(1, q_1);
-  DataType *ach_im0_1 = malloc_shared<DataType>(1, q_1);
-  DataType *ach_im1_1 = malloc_shared<DataType>(1, q_1);
-  DataType *ach_im2_1 = malloc_shared<DataType>(1, q_1);
-  ach_re0_1[0] = 0.00, ach_re1_1[0] = 0.00, ach_re2_1[0] = 0.00,
-  ach_im0_1[0] = 0.00, ach_im1_1[0] = 0.00, ach_im2_1[0] = 0.00;
-
-  DataType *ach_re0_2 = malloc_shared<DataType>(1, q_2);
-  DataType *ach_re1_2 = malloc_shared<DataType>(1, q_2);
-  DataType *ach_re2_2 = malloc_shared<DataType>(1, q_2);
-  DataType *ach_im0_2 = malloc_shared<DataType>(1, q_2);
-  DataType *ach_im1_2 = malloc_shared<DataType>(1, q_2);
-  DataType *ach_im2_2 = malloc_shared<DataType>(1, q_2);
-  ach_re0_2[0] = 0.00, ach_re1_2[0] = 0.00, ach_re2_2[0] = 0.00,
-  ach_im0_2[0] = 0.00, ach_im1_2[0] = 0.00, ach_im2_2[0] = 0.00;
-
-  DataType *ach_re0_3 = malloc_shared<DataType>(1, q_3);
-  DataType *ach_re1_3 = malloc_shared<DataType>(1, q_3);
-  DataType *ach_re2_3 = malloc_shared<DataType>(1, q_3);
-  DataType *ach_im0_3 = malloc_shared<DataType>(1, q_3);
-  DataType *ach_im1_3 = malloc_shared<DataType>(1, q_3);
-  DataType *ach_im2_3 = malloc_shared<DataType>(1, q_3);
-  ach_re0_3[0] = 0.00, ach_re1_3[0] = 0.00, ach_re2_3[0] = 0.00,
-  ach_im0_3[0] = 0.00, ach_im1_3[0] = 0.00, ach_im2_3[0] = 0.00;
-
-  // Memory allocation
-
-  int *gpu_inv_igp_index_0 = malloc_device<int>(ngpown, q_0);
-  int *gpu_indinv_0 = malloc_device<int>(ngpown, q_0);
-  DataType *gpu_vcoul_0 = malloc_device<DataType>(ncouls, q_0);
-  DataType *gpu_wx_array_0 = malloc_device<DataType>(nend - nstart, q_0);
-  ComplexType *gpu_wtilde_array_0 =
-      malloc_device<ComplexType>(ngpown * ncouls, q_0);
-  ComplexType *gpu_I_eps_array_0 =
-      malloc_device<ComplexType>(ngpown * ncouls, q_0);
-  ComplexType *gpu_aqsntemp_0 =
-      malloc_device<ComplexType>(number_bands_per_tile * ncouls, q_0);
-  ComplexType *gpu_aqsmtemp_0 =
-      malloc_device<ComplexType>(number_bands_per_tile * ncouls, q_0);
-  ComplexType *sch_0 =
-      malloc_device<ComplexType>(number_bands_per_tile * ncouls, q_0);
-
-  int *gpu_inv_igp_index_1 = malloc_device<int>(ngpown, q_1);
-  int *gpu_indinv_1 = malloc_device<int>(ngpown, q_1);
-  DataType *gpu_vcoul_1 = malloc_device<DataType>(ncouls, q_1);
-  DataType *gpu_wx_array_1 = malloc_device<DataType>(nend - nstart, q_1);
-  ComplexType *gpu_wtilde_array_1 =
-      malloc_device<ComplexType>(ngpown * ncouls, q_1);
-  ComplexType *gpu_I_eps_array_1 =
-      malloc_device<ComplexType>(ngpown * ncouls, q_1);
-  ComplexType *gpu_aqsntemp_1 =
-      malloc_device<ComplexType>(number_bands_per_tile * ncouls, q_1);
-  ComplexType *gpu_aqsmtemp_1 =
-      malloc_device<ComplexType>(number_bands_per_tile * ncouls, q_1);
-  ComplexType *sch_1 =
-      malloc_device<ComplexType>(number_bands_per_tile * ncouls, q_1);
-
-  int *gpu_inv_igp_index_2 = malloc_device<int>(ngpown, q_2);
-  int *gpu_indinv_2 = malloc_device<int>(ngpown, q_2);
-  DataType *gpu_vcoul_2 = malloc_device<DataType>(ncouls, q_2);
-  DataType *gpu_wx_array_2 = malloc_device<DataType>(nend - nstart, q_2);
-  ComplexType *gpu_wtilde_array_2 =
-      malloc_device<ComplexType>(ngpown * ncouls, q_2);
-  ComplexType *gpu_I_eps_array_2 =
-      malloc_device<ComplexType>(ngpown * ncouls, q_2);
-  ComplexType *gpu_aqsntemp_2 =
-      malloc_device<ComplexType>(number_bands_per_tile * ncouls, q_2);
-  ComplexType *gpu_aqsmtemp_2 =
-      malloc_device<ComplexType>(number_bands_per_tile * ncouls, q_2);
-  ComplexType *sch_2 =
-      malloc_device<ComplexType>(number_bands_per_tile * ncouls, q_2);
-
-  int *gpu_inv_igp_index_3 = malloc_device<int>(ngpown, q_3);
-  int *gpu_indinv_3 = malloc_device<int>(ngpown, q_3);
-  DataType *gpu_vcoul_3 = malloc_device<DataType>(ncouls, q_3);
-  DataType *gpu_wx_array_3 = malloc_device<DataType>(nend - nstart, q_3);
-  ComplexType *gpu_wtilde_array_3 =
-      malloc_device<ComplexType>(ngpown * ncouls, q_3);
-  ComplexType *gpu_I_eps_array_3 =
-      malloc_device<ComplexType>(ngpown * ncouls, q_3);
-  ComplexType *gpu_aqsntemp_3 =
-      malloc_device<ComplexType>(number_bands_per_tile * ncouls, q_3);
-  ComplexType *gpu_aqsmtemp_3 =
-      malloc_device<ComplexType>(number_bands_per_tile * ncouls, q_3);
-  ComplexType *sch_3 =
-      malloc_device<ComplexType>(number_bands_per_tile * ncouls, q_3);
-
-  // Copy & Pre-process
-
-  q_0.memcpy(gpu_inv_igp_index_0, inv_igp_index.dptr, ngpown * sizeof(int))
-      .wait();
-  q_0.memcpy(gpu_indinv_0, indinv.dptr, ngpown * sizeof(int)).wait();
-  q_0.memcpy(gpu_vcoul_0, vcoul.dptr, ngpown * sizeof(DataType)).wait();
-  q_0.memcpy(gpu_wtilde_array_0, wtilde_array.dptr,
-             ngpown * ncouls * sizeof(ComplexType))
-      .wait();
-  q_0.memcpy(gpu_aqsntemp_0, aqsntemp.dptr,
-             number_bands_per_tile * ncouls * sizeof(ComplexType))
-      .wait();
-  q_0.memcpy(gpu_aqsmtemp_0, aqsmtemp.dptr,
-             number_bands_per_tile * ncouls * sizeof(ComplexType))
-      .wait();
-
-  auto e_0_1 = q_0.submit([&](handler &h) {
-    h.parallel_for(range<2>(number_bands_per_tile, ngpown), [=](item<2> item) {
-      int n1 = item.get_id(0);
-      int my_igp = item.get_id(1);
-      int igp = gpu_indinv_0[gpu_inv_igp_index_0[my_igp]];
-      sch_0[n1 * ncouls + my_igp] =
-          ComplexType_conj(gpu_aqsmtemp_0[n1 * ncouls + igp]) *
-          gpu_aqsntemp_0[n1 * ncouls + igp] * 0.5 * gpu_vcoul_0[igp] *
-          gpu_wtilde_array_0[my_igp * ncouls + igp];
-    });
-  });
-
-  q_0.memcpy(gpu_wx_array_0, wx_array.dptr, (nend - nstart) * sizeof(DataType))
-      .wait();
-  q_0.memcpy(gpu_I_eps_array_0, I_eps_array.dptr,
-             ngpown * ncouls * sizeof(ComplexType))
-      .wait();
-
-  q_1.memcpy(gpu_inv_igp_index_1, inv_igp_index.dptr, ngpown * sizeof(int))
-      .wait();
-  q_1.memcpy(gpu_indinv_1, indinv.dptr, ngpown * sizeof(int)).wait();
-  q_1.memcpy(gpu_vcoul_1, vcoul.dptr, ngpown * sizeof(DataType)).wait();
-  q_1.memcpy(gpu_wtilde_array_1, wtilde_array.dptr,
-             ngpown * ncouls * sizeof(ComplexType))
-      .wait();
-  q_1.memcpy(gpu_aqsntemp_1, aqsntemp.dptr + number_bands_per_tile,
-             number_bands_per_tile * ncouls * sizeof(ComplexType))
-      .wait();
-  q_1.memcpy(gpu_aqsmtemp_1, aqsmtemp.dptr + number_bands_per_tile,
-             number_bands_per_tile * ncouls * sizeof(ComplexType))
-      .wait();
-
-  auto e_1_1 = q_1.submit([&](handler &h) {
-    h.parallel_for(range<2>(number_bands_per_tile, ngpown), [=](item<2> item) {
-      int n1 = item.get_id(0);
-      int my_igp = item.get_id(1);
-      int igp = gpu_indinv_1[gpu_inv_igp_index_1[my_igp]];
-      sch_1[n1 * ncouls + my_igp] =
-          ComplexType_conj(gpu_aqsmtemp_1[n1 * ncouls + igp]) *
-          gpu_aqsntemp_1[n1 * ncouls + igp] * 0.5 * gpu_vcoul_1[igp] *
-          gpu_wtilde_array_1[my_igp * ncouls + igp];
-    });
-  });
-
-  q_1.memcpy(gpu_wx_array_1, wx_array.dptr, (nend - nstart) * sizeof(DataType))
-      .wait();
-  q_1.memcpy(gpu_I_eps_array_1, I_eps_array.dptr,
-             ngpown * ncouls * sizeof(ComplexType))
-      .wait();
-
-  q_2.memcpy(gpu_inv_igp_index_2, inv_igp_index.dptr, ngpown * sizeof(int))
-      .wait();
-  q_2.memcpy(gpu_indinv_2, indinv.dptr, ngpown * sizeof(int)).wait();
-  q_2.memcpy(gpu_vcoul_2, vcoul.dptr, ngpown * sizeof(DataType)).wait();
-  q_2.memcpy(gpu_wtilde_array_2, wtilde_array.dptr,
-             ngpown * ncouls * sizeof(ComplexType))
-      .wait();
-  q_2.memcpy(gpu_aqsntemp_2, aqsntemp.dptr + number_bands_per_tile * 2,
-             number_bands_per_tile * ncouls * sizeof(ComplexType))
-      .wait();
-  q_2.memcpy(gpu_aqsmtemp_2, aqsmtemp.dptr + number_bands_per_tile * 2,
-             number_bands_per_tile * ncouls * sizeof(ComplexType))
-      .wait();
-
-  auto e_2_1 = q_2.submit([&](handler &h) {
-    h.parallel_for(range<2>(number_bands_per_tile, ngpown), [=](item<2> item) {
-      int n1 = item.get_id(0);
-      int my_igp = item.get_id(1);
-      int igp = gpu_indinv_2[gpu_inv_igp_index_2[my_igp]];
-      sch_2[n1 * ncouls + my_igp] =
-          ComplexType_conj(gpu_aqsmtemp_2[n1 * ncouls + igp]) *
-          gpu_aqsntemp_2[n1 * ncouls + igp] * 0.5 * gpu_vcoul_2[igp] *
-          gpu_wtilde_array_2[my_igp * ncouls + igp];
-    });
-  });
-
-  q_2.memcpy(gpu_wx_array_2, wx_array.dptr, (nend - nstart) * sizeof(DataType))
-      .wait();
-  q_2.memcpy(gpu_I_eps_array_2, I_eps_array.dptr,
-             ngpown * ncouls * sizeof(ComplexType))
-      .wait();
-
-  q_3.memcpy(gpu_inv_igp_index_3, inv_igp_index.dptr, ngpown * sizeof(int))
-      .wait();
-  q_3.memcpy(gpu_indinv_3, indinv.dptr, ngpown * sizeof(int)).wait();
-  q_3.memcpy(gpu_vcoul_3, vcoul.dptr, ngpown * sizeof(DataType)).wait();
-  q_3.memcpy(gpu_wtilde_array_3, wtilde_array.dptr,
-             ngpown * ncouls * sizeof(ComplexType))
-      .wait();
-  q_3.memcpy(gpu_aqsntemp_3, aqsntemp.dptr + number_bands_per_tile * 3,
-             number_bands_per_tile * ncouls * sizeof(ComplexType))
-      .wait();
-  q_3.memcpy(gpu_aqsmtemp_3, aqsmtemp.dptr + number_bands_per_tile * 3,
-             number_bands_per_tile * ncouls * sizeof(ComplexType))
-      .wait();
-
-  auto e_3_1 = q_3.submit([&](handler &h) {
-    h.parallel_for(range<2>(number_bands_per_tile, ngpown), [=](item<2> item) {
-      int n1 = item.get_id(0);
-      int my_igp = item.get_id(1);
-      int igp = gpu_indinv_3[gpu_inv_igp_index_3[my_igp]];
-      sch_3[n1 * ncouls + my_igp] =
-          ComplexType_conj(gpu_aqsmtemp_3[n1 * ncouls + igp]) *
-          gpu_aqsntemp_3[n1 * ncouls + igp] * 0.5 * gpu_vcoul_3[igp] *
-          gpu_wtilde_array_3[my_igp * ncouls + igp];
-    });
-  });
-
-  q_3.memcpy(gpu_wx_array_3, wx_array.dptr, (nend - nstart) * sizeof(DataType))
-      .wait();
-  q_3.memcpy(gpu_I_eps_array_3, I_eps_array.dptr,
-             ngpown * ncouls * sizeof(ComplexType))
-      .wait();
-
-  // Calculation
-
-  auto e_0_2 = q_0.submit([&](handler &h) {
-    h.depends_on(e_0_1);
-    h.parallel_for(
-        nd_range<2>(range<2>(number_bands_per_tile, _ngpown), range<2>(64, 2)),
-        reduction(ach_re0_0, sycl::plus<>()),
-        reduction(ach_re1_0, sycl::plus<>()),
-        reduction(ach_re2_0, sycl::plus<>()),
-        reduction(ach_im0_0, sycl::plus<>()),
-        reduction(ach_im1_0, sycl::plus<>()),
-        reduction(ach_im2_0, sycl::plus<>()),
-        [=](nd_item<2> item, auto &ach_re0_0, auto &ach_re1_0, auto &ach_re2_0,
-            auto &ach_im0_0, auto &ach_im1_0,
-            auto &ach_im2_0) [[intel::reqd_sub_group_size(32)]] {
-          int my_igp = item.get_global_id(1);
-
-          if (item.get_global_id(0) >= number_bands || my_igp >= ngpown) return;
-
-          ComplexType sch_store1 =
-              sch_0[item.get_global_id(0) * ncouls + my_igp];
-
-          for (int ig = 0; ig < ncouls; ++ig) {
-            auto wdiff =
-                gpu_wx_array_0[0] - gpu_wtilde_array_0[my_igp * ncouls + ig];
-            auto delw = ComplexType_conj(wdiff) *
-                        (1 / (wdiff * ComplexType_conj(wdiff)).real());
-            auto sch_array =
-                delw * gpu_wtilde_array_0[my_igp * ncouls + ig] * sch_store1;
-            ach_re0_0 += (sch_array).real();
-            ach_im0_0 += (sch_array).imag();
-
-            wdiff =
-                gpu_wx_array_0[1] - gpu_wtilde_array_0[my_igp * ncouls + ig];
-            delw = ComplexType_conj(wdiff) *
-                   (1 / (wdiff * ComplexType_conj(wdiff)).real());
-            sch_array =
-                delw * gpu_wtilde_array_0[my_igp * ncouls + ig] * sch_store1;
-            ach_re1_0 += (sch_array).real();
-            ach_im1_0 += (sch_array).imag();
-
-            wdiff =
-                gpu_wx_array_0[2] - gpu_wtilde_array_0[my_igp * ncouls + ig];
-            delw = ComplexType_conj(wdiff) *
-                   (1 / (wdiff * ComplexType_conj(wdiff)).real());
-            sch_array =
-                delw * gpu_wtilde_array_0[my_igp * ncouls + ig] * sch_store1;
-            ach_re2_0 += (sch_array).real();
-            ach_im2_0 += (sch_array).imag();
-          }
-        });
-  });
-
-  auto e_1_2 = q_1.submit([&](handler &h) {
-    h.depends_on(e_1_1);
-    h.parallel_for(
-        nd_range<2>(range<2>(number_bands_per_tile, _ngpown), range<2>(64, 2)),
-        reduction(ach_re0_1, sycl::plus<>()),
-        reduction(ach_re1_1, sycl::plus<>()),
-        reduction(ach_re2_1, sycl::plus<>()),
-        reduction(ach_im0_1, sycl::plus<>()),
-        reduction(ach_im1_1, sycl::plus<>()),
-        reduction(ach_im2_1, sycl::plus<>()),
-        [=](nd_item<2> item, auto &ach_re0_1, auto &ach_re1_1, auto &ach_re2_1,
-            auto &ach_im0_1, auto &ach_im1_1,
-            auto &ach_im2_1) [[intel::reqd_sub_group_size(32)]] {
-          int my_igp = item.get_global_id(1);
-
-          if (item.get_global_id(0) + number_bands_per_tile >= number_bands ||
-              my_igp >= ngpown)
-            return;
-
-          ComplexType sch_store1 =
-              sch_1[item.get_global_id(0) * ncouls + my_igp];
-
-          for (int ig = 0; ig < ncouls; ++ig) {
-            auto wdiff =
-                gpu_wx_array_1[0] - gpu_wtilde_array_1[my_igp * ncouls + ig];
-            auto delw = ComplexType_conj(wdiff) *
-                        (1 / (wdiff * ComplexType_conj(wdiff)).real());
-            auto sch_array =
-                delw * gpu_wtilde_array_1[my_igp * ncouls + ig] * sch_store1;
-            ach_re0_1 += (sch_array).real();
-            ach_im0_1 += (sch_array).imag();
-
-            wdiff =
-                gpu_wx_array_1[1] - gpu_wtilde_array_1[my_igp * ncouls + ig];
-            delw = ComplexType_conj(wdiff) *
-                   (1 / (wdiff * ComplexType_conj(wdiff)).real());
-            sch_array =
-                delw * gpu_wtilde_array_1[my_igp * ncouls + ig] * sch_store1;
-            ach_re1_1 += (sch_array).real();
-            ach_im1_1 += (sch_array).imag();
-
-            wdiff =
-                gpu_wx_array_1[2] - gpu_wtilde_array_1[my_igp * ncouls + ig];
-            delw = ComplexType_conj(wdiff) *
-                   (1 / (wdiff * ComplexType_conj(wdiff)).real());
-            sch_array =
-                delw * gpu_wtilde_array_1[my_igp * ncouls + ig] * sch_store1;
-            ach_re2_1 += (sch_array).real();
-            ach_im2_1 += (sch_array).imag();
-          }
-        });
-  });
-
-  auto e_2_2 = q_2.submit([&](handler &h) {
-    h.depends_on(e_2_1);
-    h.parallel_for(
-        nd_range<2>(range<2>(number_bands_per_tile, _ngpown), range<2>(64, 2)),
-        reduction(ach_re0_2, sycl::plus<>()),
-        reduction(ach_re1_2, sycl::plus<>()),
-        reduction(ach_re2_2, sycl::plus<>()),
-        reduction(ach_im0_2, sycl::plus<>()),
-        reduction(ach_im1_2, sycl::plus<>()),
-        reduction(ach_im2_2, sycl::plus<>()),
-        [=](nd_item<2> item, auto &ach_re0_2, auto &ach_re1_2, auto &ach_re2_2,
-            auto &ach_im0_2, auto &ach_im1_2,
-            auto &ach_im2_2) [[intel::reqd_sub_group_size(32)]] {
-          int my_igp = item.get_global_id(1);
-
-          if (item.get_global_id(0) + number_bands_per_tile * 2 >=
-                  number_bands ||
-              my_igp >= ngpown)
-            return;
-
-          ComplexType sch_store1 =
-              sch_2[item.get_global_id(0) * ncouls + my_igp];
-
-          for (int ig = 0; ig < ncouls; ++ig) {
-            auto wdiff =
-                gpu_wx_array_2[0] - gpu_wtilde_array_2[my_igp * ncouls + ig];
-            auto delw = ComplexType_conj(wdiff) *
-                        (1 / (wdiff * ComplexType_conj(wdiff)).real());
-            auto sch_array =
-                delw * gpu_wtilde_array_2[my_igp * ncouls + ig] * sch_store1;
-            ach_re0_2 += (sch_array).real();
-            ach_im0_2 += (sch_array).imag();
-
-            wdiff =
-                gpu_wx_array_2[1] - gpu_wtilde_array_2[my_igp * ncouls + ig];
-            delw = ComplexType_conj(wdiff) *
-                   (1 / (wdiff * ComplexType_conj(wdiff)).real());
-            sch_array =
-                delw * gpu_wtilde_array_2[my_igp * ncouls + ig] * sch_store1;
-            ach_re1_2 += (sch_array).real();
-            ach_im1_2 += (sch_array).imag();
-
-            wdiff =
-                gpu_wx_array_2[2] - gpu_wtilde_array_2[my_igp * ncouls + ig];
-            delw = ComplexType_conj(wdiff) *
-                   (1 / (wdiff * ComplexType_conj(wdiff)).real());
-            sch_array =
-                delw * gpu_wtilde_array_2[my_igp * ncouls + ig] * sch_store1;
-            ach_re2_2 += (sch_array).real();
-            ach_im2_2 += (sch_array).imag();
-          }
-        });
-  });
-
-  auto e_3_2 = q_3.submit([&](handler &h) {
-    h.depends_on(e_3_1);
-    h.parallel_for(
-        nd_range<2>(range<2>(number_bands_per_tile, _ngpown), range<2>(64, 2)),
-        reduction(ach_re0_3, sycl::plus<>()),
-        reduction(ach_re1_3, sycl::plus<>()),
-        reduction(ach_re2_3, sycl::plus<>()),
-        reduction(ach_im0_3, sycl::plus<>()),
-        reduction(ach_im1_3, sycl::plus<>()),
-        reduction(ach_im2_3, sycl::plus<>()),
-        [=](nd_item<2> item, auto &ach_re0_3, auto &ach_re1_3, auto &ach_re2_3,
-            auto &ach_im0_3, auto &ach_im1_3,
-            auto &ach_im2_3) [[intel::reqd_sub_group_size(32)]] {
-          int my_igp = item.get_global_id(1);
-
-          if (item.get_global_id(0) + number_bands_per_tile * 3 >=
-                  number_bands ||
-              my_igp >= ngpown)
-            return;
-
-          ComplexType sch_store1 =
-              sch_3[item.get_global_id(0) * ncouls + my_igp];
-
-          for (int ig = 0; ig < ncouls; ++ig) {
-            auto wdiff =
-                gpu_wx_array_3[0] - gpu_wtilde_array_3[my_igp * ncouls + ig];
-            auto delw = ComplexType_conj(wdiff) *
-                        (1 / (wdiff * ComplexType_conj(wdiff)).real());
-            auto sch_array =
-                delw * gpu_wtilde_array_3[my_igp * ncouls + ig] * sch_store1;
-            ach_re0_3 += (sch_array).real();
-            ach_im0_3 += (sch_array).imag();
-
-            wdiff =
-                gpu_wx_array_3[1] - gpu_wtilde_array_3[my_igp * ncouls + ig];
-            delw = ComplexType_conj(wdiff) *
-                   (1 / (wdiff * ComplexType_conj(wdiff)).real());
-            sch_array =
-                delw * gpu_wtilde_array_3[my_igp * ncouls + ig] * sch_store1;
-            ach_re1_3 += (sch_array).real();
-            ach_im1_3 += (sch_array).imag();
-
-            wdiff =
-                gpu_wx_array_3[2] - gpu_wtilde_array_3[my_igp * ncouls + ig];
-            delw = ComplexType_conj(wdiff) *
-                   (1 / (wdiff * ComplexType_conj(wdiff)).real());
-            sch_array =
-                delw * gpu_wtilde_array_3[my_igp * ncouls + ig] * sch_store1;
-            ach_re2_3 += (sch_array).real();
-            ach_im2_3 += (sch_array).imag();
-          }
-        });
-  });
-
-  e_0_2.wait();
-  e_1_2.wait();
-  e_2_2.wait();
-  e_3_2.wait();
-
-  achtemp(0) =
-      ComplexType(ach_re0_0[0] + ach_re0_1[0] + ach_re0_2[0] + ach_re0_3[0],
-                  ach_im0_0[0] + ach_im0_1[0] + ach_im0_2[0] + ach_im0_3[0]);
-  achtemp(1) =
-      ComplexType(ach_re1_0[0] + ach_re1_1[0] + ach_re1_2[0] + ach_re1_3[0],
-                  ach_im1_0[0] + ach_im1_1[0] + ach_im1_2[0] + ach_im1_3[0]);
-  achtemp(2) =
-      ComplexType(ach_re2_0[0] + ach_re2_1[0] + ach_re2_2[0] + ach_re2_3[0],
-                  ach_im2_0[0] + ach_im2_1[0] + ach_im2_2[0] + ach_im2_3[0]);
-
-  sycl::free(gpu_inv_igp_index_0, q_0);
-  sycl::free(gpu_indinv_0, q_0);
-  sycl::free(gpu_vcoul_0, q_0);
-  sycl::free(gpu_wx_array_0, q_0);
-  sycl::free(gpu_wtilde_array_0, q_0);
-  sycl::free(gpu_I_eps_array_0, q_0);
-  sycl::free(gpu_aqsntemp_0, q_0);
-  sycl::free(gpu_aqsmtemp_0, q_0);
-  sycl::free(sch_0, q_0);
-  sycl::free(ach_im0_0, q_0);
-  sycl::free(ach_im1_0, q_0);
-  sycl::free(ach_im2_0, q_0);
-  sycl::free(ach_re0_0, q_0);
-  sycl::free(ach_re1_0, q_0);
-  sycl::free(ach_re2_0, q_0);
-
-  sycl::free(gpu_inv_igp_index_1, q_1);
-  sycl::free(gpu_indinv_1, q_1);
-  sycl::free(gpu_vcoul_1, q_1);
-  sycl::free(gpu_wx_array_1, q_1);
-  sycl::free(gpu_wtilde_array_1, q_1);
-  sycl::free(gpu_I_eps_array_1, q_1);
-  sycl::free(gpu_aqsntemp_1, q_1);
-  sycl::free(gpu_aqsmtemp_1, q_1);
-  sycl::free(sch_1, q_1);
-  sycl::free(ach_im0_1, q_1);
-  sycl::free(ach_im1_1, q_1);
-  sycl::free(ach_im2_1, q_1);
-  sycl::free(ach_re0_1, q_1);
-  sycl::free(ach_re1_1, q_1);
-  sycl::free(ach_re2_1, q_1);
-
-  sycl::free(gpu_inv_igp_index_2, q_2);
-  sycl::free(gpu_indinv_2, q_2);
-  sycl::free(gpu_vcoul_2, q_2);
-  sycl::free(gpu_wx_array_2, q_2);
-  sycl::free(gpu_wtilde_array_2, q_2);
-  sycl::free(gpu_I_eps_array_2, q_2);
-  sycl::free(gpu_aqsntemp_2, q_2);
-  sycl::free(gpu_aqsmtemp_2, q_2);
-  sycl::free(sch_2, q_2);
-  sycl::free(ach_im0_2, q_2);
-  sycl::free(ach_im1_2, q_2);
-  sycl::free(ach_im2_2, q_2);
-  sycl::free(ach_re0_2, q_2);
-  sycl::free(ach_re1_2, q_2);
-  sycl::free(ach_re2_2, q_2);
-
-  sycl::free(gpu_inv_igp_index_3, q_3);
-  sycl::free(gpu_indinv_3, q_3);
-  sycl::free(gpu_vcoul_3, q_3);
-  sycl::free(gpu_wx_array_3, q_3);
-  sycl::free(gpu_wtilde_array_3, q_3);
-  sycl::free(gpu_I_eps_array_3, q_3);
-  sycl::free(gpu_aqsntemp_3, q_3);
-  sycl::free(gpu_aqsmtemp_3, q_3);
-  sycl::free(sch_3, q_3);
-  sycl::free(ach_im0_3, q_3);
-  sycl::free(ach_im1_3, q_3);
-  sycl::free(ach_im2_3, q_3);
-  sycl::free(ach_re0_3, q_3);
-  sycl::free(ach_re1_3, q_3);
-  sycl::free(ach_re2_3, q_3);
+  for (auto &thread : threads) {
+    thread.join();
+  }
 }
