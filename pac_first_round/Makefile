@@ -3,7 +3,7 @@ CXX=dpcpp
 
 gpp_obj = main.o
 
-CXXFLAGS = -Ofast -std=c++20 -qopenmp
+CXXFLAGS = -Ofast -std=c++20 -qopenmp -fsycl-targets=spir64_gen -Xs "-device xe_hp_sdv"
 LDFLAGS = 
 
 all: main 
